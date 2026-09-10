@@ -52,7 +52,7 @@ class FileService:
                 continue
 
             entries.append(FileEntry(
-                path=str(rel),
+                path=rel.as_posix(),
                 type='directory' if item.is_dir() else 'file',
             ))
 
@@ -172,7 +172,7 @@ class FileService:
             return None
 
         dest.parent.mkdir(parents=True, exist_ok=True)
-        affected = [str(f.relative_to(root)) for f in source.rglob('*') if f.is_file()]
+        affected = [f.relative_to(root).as_posix() for f in source.rglob('*') if f.is_file()]
 
         source.rename(dest)
         logger.info(
@@ -190,7 +190,7 @@ class FileService:
         if target is None or not target.is_dir():
             return None
 
-        affected = [str(f.relative_to(root)) for f in target.rglob('*') if f.is_file()]
+        affected = [f.relative_to(root).as_posix() for f in target.rglob('*') if f.is_file()]
 
         shutil.rmtree(target)
         logger.info('Deleted directory %s/%s (%d files)', slug, dir_path, len(affected))
@@ -240,7 +240,7 @@ class FileService:
                 if any(p in IGNORED or p.startswith('.') for p in rel.parts):
                     continue
 
-                zf.write(item, rel)
+                zf.write(item, rel.as_posix())
 
         return Path(tmp_name)
 
