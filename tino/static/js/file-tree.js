@@ -1,4 +1,5 @@
 import {
+  DEBOUNCE_MS,
   FILE_ICON,
   FOLDER_ICON,
   SINGLE_ITEM,
@@ -12,6 +13,7 @@ import { TreeActions } from './tree-actions.js'
 import { TreeBuilder } from './tree-builder.js'
 import { TreeDrag } from './tree-drag.js'
 import { TreeNewMenu } from './tree-new-menu.js'
+import { filterNodes } from './tree-filter.js'
 
 /**
  * Manages the file explorer tree and bucket loading.
@@ -29,6 +31,7 @@ export class FileTree {
     this.newMenu = new TreeNewMenu(app)
     this.filePaths = new Set()
     this._nodes = []
+    this.collapsedPaths = new Set()
   }
 
   /** Fetch all buckets and auto-select if only one. */
@@ -66,7 +69,14 @@ export class FileTree {
 
   /** Fetch file list and render the hierarchical tree. */
 
+  _getStorageKey() {
+    return this.app.bucket ? `tino_collapsed_${this.app.bucket}` : null
+  }
+
   async loadFiles() {
+    const saved = localStorage.getItem(this._getStorageKey())
+    this.collapsedPaths = new Set(saved ? JSON.parse(saved) : [])
+    
     const files = await this.app.api.listFiles(this.app.bucket)
     this.filePaths = new Set(files.map(fl => fl.path))
     this._nodes = TreeBuilder.build(
@@ -75,53 +85,43 @@ export class FileTree {
     this._renderTree()
   }
 
+  /** Force parent folders of a specific path to expand and re-render, then scroll into view */
+  
+  reveal(filePath) {
+    if (!filePath) 
+      return
+    let currentPath = ''
+    let changed = false
+    const parts = filePath.split('/')
+    parts.pop()
+    parts.forEach(part => {
+      currentPath += (currentPath ? '/' : '') + part
+      if (this.collapsedPaths.delete(currentPath)) 
+        changed = true
+    })
+    if (changed) {
+      this._saveCollapsedState()
+      this._renderTree()
+    }
+    setTimeout(() => {
+      const safePath = filePath.replace(/"/gu, '\\"')
+      const el = this.app.els.fileTree.querySelector(`[data-file="${safePath}"]`)
+      if (el)
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 0)
+  }
+
   /** Re-render the tree, applying the current search filter. */
 
   _renderTree() {
     const query = this.app.els.fileSearch.value
       .trim().toLowerCase()
-    const collapsed = query ? new Set() : this._getCollapsedPaths()
-    const nodes = FileTree._filterNodes(this._nodes, query)
+    const collapsed = query ? new Set() : this.collapsedPaths
+    const nodes = filterNodes(this._nodes, query)
     const tree = this.app.els.fileTree
     this._canEditCached = this._canEdit()
     tree.innerHTML = ''
     this._renderNodes(tree, nodes, collapsed)
-  }
-
-  /** Recursively keep only nodes whose path matches the query. */
-
-  static _filterNodes(nodes, query) {
-    if (!query)
-      return nodes
-    const result = []
-    nodes.forEach(node => {
-      if (node.type === 'directory')
-        FileTree._filterDir(result, node, query)
-      else if (node.path.toLowerCase().includes(query))
-        result.push(node)
-    })
-    return result
-  }
-
-  static _filterDir(result, node, query) {
-    const children = FileTree._filterNodes(node.children, query)
-    if (children.length) {
-      result.push({
-        children,
-        name: node.name,
-        path: node.path,
-        status: node.status,
-        type: node.type,
-      })
-    }
-  }
-
-  _getCollapsedPaths() {
-    const paths = new Set()
-    this.app.els.fileTree
-      .querySelectorAll('.folder-item.collapsed')
-      .forEach(el => paths.add(el.dataset.folder))
-    return paths
   }
 
   _renderNodes(parent, nodes, collapsed) {
@@ -159,18 +159,10 @@ export class FileTree {
 
   static _folderActionsHtml() {
     return '<div class="file-actions">' +
-      '<button class="icon-btn folder-new-file" title="New file">' +
-      '<span class="material-symbols-outlined">' +
-      'note_add</span></button>' +
-      '<button class="icon-btn folder-new-folder" title="New folder">' +
-      '<span class="material-symbols-outlined">' +
-      'create_new_folder</span></button>' +
-      '<button class="icon-btn folder-rename" title="Rename">' +
-      '<span class="material-symbols-outlined">' +
-      'edit</span></button>' +
-      '<button class="icon-btn folder-delete" title="Delete">' +
-      '<span class="material-symbols-outlined">' +
-      'delete</span></button></div>'
+      `${FileTree._btnHtml('folder-new-file', 'New file', 'note_add')}` +
+      `${FileTree._btnHtml('folder-new-folder', 'New folder', 'create_new_folder')}` +
+      `${FileTree._btnHtml('folder-rename', 'Rename', 'edit')}` +
+      `${FileTree._btnHtml('folder-delete', 'Delete', 'delete')}</div>`
   }
 
   _renderFile(parent, node) {
@@ -203,24 +195,20 @@ export class FileTree {
       `${STATUS_CLASSES[status]}">${STATUS_ICONS[status]}</span>`
   }
 
+  static _btnHtml(cls, title, icon) {
+    return `<button class="icon-btn ${cls}" title="${title}">` +
+      `<span class="material-symbols-outlined">${icon}</span></button>`
+  }
+
   static _fileActionsHtml(status) {
-    if (status === 'deleted') {
-      return '<div class="file-actions">' +
-        '<button class="icon-btn file-reset" title="Restore">' +
-        '<span class="material-symbols-outlined">undo</span></button></div>'
-    }
+    if (status === 'deleted')
+      return `<div class="file-actions">${FileTree._btnHtml('file-reset', 'Restore', 'undo')}</div>`
     let resetBtn = ''
-    if (status && status !== 'untracked') {
-      resetBtn = '<button class="icon-btn file-reset" title="Reset">' +
-        '<span class="material-symbols-outlined">undo</span></button>'
-    }
+    if (status && status !== 'untracked')
+      resetBtn = FileTree._btnHtml('file-reset', 'Reset', 'undo')
     return '<div class="file-actions">' +
-      '<button class="icon-btn file-rename" title="Rename">' +
-      '<span class="material-symbols-outlined">' +
-      `edit</span></button>${resetBtn}` +
-      '<button class="icon-btn file-delete" title="Delete">' +
-      '<span class="material-symbols-outlined">' +
-      'delete</span></button></div>'
+      `${FileTree._btnHtml('file-rename', 'Rename', 'edit')}${resetBtn}` +
+      `${FileTree._btnHtml('file-delete', 'Delete', 'delete')}</div>`
   }
 
   _canEdit() {
@@ -231,9 +219,11 @@ export class FileTree {
   /** Bind the file search input to re-render on typing. */
 
   bindSearch() {
-    this.app.els.fileSearch.addEventListener(
-      'input', () => this._renderTree(),
-    )
+    let timeout = null
+    this.app.els.fileSearch.addEventListener('input', () => {
+      clearTimeout(timeout)
+      timeout = setTimeout(() => this._renderTree(), DEBOUNCE_MS)
+    })
   }
 
   /** Bind the "New" menu in the explorer header (file / folder / template). */
@@ -266,8 +256,13 @@ export class FileTree {
       this.actions.deleteFolder(folderPath)
     else if (evt.target.closest('.folder-rename'))
       this.actions.renameFolder(folderPath)
-    else
-      folderItem.classList.toggle('collapsed')
+    else {
+      if (folderItem.classList.toggle('collapsed'))
+        this.collapsedPaths.add(folderPath)
+      else
+        this.collapsedPaths.delete(folderPath)
+      this._saveCollapsedState()
+    }
   }
 
   /** Bind drag-and-drop upload on the file explorer panel. */
@@ -295,6 +290,10 @@ export class FileTree {
       this.actions.resetFile(filePath)
     else if (!item.classList.contains('file-deleted'))
       this.app.editor.openFile(filePath)
+  }
+
+  _saveCollapsedState() {
+    localStorage.setItem(this._getStorageKey(), JSON.stringify([...this.collapsedPaths]))
   }
 
 }
