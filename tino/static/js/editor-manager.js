@@ -58,6 +58,7 @@ export class EditorManager {
 
   _activateTab(path, loaded) {
     this.app.currentFile = path
+    this.app.fileTree.reveal(path)
     this.app.els.editor.setPlaceholder('')
     if (this.app.openTabs.indexOf(path) === INDEX_NOT_FOUND)
       this.app.openTabs.push(path)
@@ -128,9 +129,7 @@ export class EditorManager {
 
   async saveCurrentFile() {
     const path = this.app.currentFile
-    if (!this.app.bucket || !path || BinaryPreview.isImage(path))
-      return
-    if (!(path in this.app.fileBuffers))
+    if (!this.app.bucket || !path || BinaryPreview.isImage(path) || !(path in this.app.fileBuffers))
       return
     const content = this.app.fileBuffers[path]
     const result = await this.app.api.saveFile(this.app.bucket, path, content)

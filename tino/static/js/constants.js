@@ -58,6 +58,10 @@ export const ISO_DATETIME_LEN = 19
 
 export const SHA_SHORT_LEN = 7
 
+/** Debouce timeout for file-tree search-as-you-type */
+
+export const DEBOUNCE_MS = 150
+
 /** Material Symbols icon for a file node in the tree. */
 
 export const FILE_ICON =
